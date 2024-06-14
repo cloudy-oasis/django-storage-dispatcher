@@ -1,0 +1,22 @@
+ARG ALPINE_TAG=alpine:3.16
+FROM $ALPINE_TAG
+
+WORKDIR /usr/src/app
+
+# set up python and pip
+ARG PYTHON_TAG=python3
+ARG PIP_TAG=py3-pip
+RUN apk add --no-cache $PYTHON_TAG $PIP_TAG
+COPY ./env/requirements.txt requirements.txt
+RUN /usr/bin/pip3 install --no-cache-dir -r requirements.txt
+
+# set up test python package and install it
+COPY django_storage_dispatcher django_storage_dispatcher
+
+# set up test django project
+
+# run django tests
+
+COPY ./env/entrypoint entrypoint
+ENTRYPOINT ["/bin/ash", "./entrypoint"]
+

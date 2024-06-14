@@ -1,0 +1,3 @@
+echo 'Build successful!'
+exit 0
+

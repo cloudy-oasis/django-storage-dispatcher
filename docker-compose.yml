@@ -1,0 +1,20 @@
+{
+    "services": {
+        "storage-dispatcher": {
+            "container_name": "storage-dispatcher",
+            "hostname": "localhost",
+            "build": {
+                "context": ".",
+                "dockerfile": "env/dockerfile",
+            },
+            "depends_on": [],
+            "ports": [
+                "8000:8000"
+            ],
+            "volumes": [
+                "./env:/usr/src/app"
+            ]
+        }
+    }
+}
+
