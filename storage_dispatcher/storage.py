@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from django import get_version
 from django.conf import settings
@@ -10,7 +10,12 @@ from django.utils.deconstruct import deconstructible
 from django.utils.functional import cached_property
 from django.utils.module_loading import import_string
 
-from .resolvers import ResolutionError, _NoResolutionError
+from .resolvers import (
+    ResolutionError,
+    StorageResolver,
+    _NoResolutionError,
+    _NoResolver,
+)
 
 
 __all__ = [
@@ -23,10 +28,32 @@ def is_self_managed() -> bool:
     """
     We manage our own storage on Django < 4.2
     """
-    return (
-        int(get_version().split(".")[0]) < 4
-        or int(get_version().split(".")[1]) < 2
-    )
+    version = get_version().split(".")
+
+    if int(version[0]) < 4:
+        return True
+    if int(version[0]) > 4:
+        return False
+
+    return int(version[1]) < 2
+
+# Storage backend key in the Django STORAGES variable.
+_BACKEND = "BACKEND"
+
+# Storage options key in the Django STORAGES variable.
+_OPTIONS = "OPTIONS"
+
+# Default storage key in the Django STORAGES variable.
+_DEFAULT = "default"
+
+# Fallback storage alias.
+_FALLBACK = "fallback"
+
+# Storages key in a dispatcher's options.
+_STORAGES = "storages"
+
+# Resolver key in a dispatcher's options.
+_RESOLVER = "resolver"
 
 
 @deconstructible
@@ -48,22 +75,88 @@ class StorageDispatcher(Storage):
     documentation for details.
     """
 
-    # Storage backend key in the Django STORAGES variable.
-    _BACKEND = "BACKEND"
-    # Storage options key in the Django STORAGES variable.
-    _OPTIONS = "OPTIONS"
-    # Default storage key in the Django STORAGES variable.
-    _DEFAULT = "default"
-    # Fallback storage alias.
-    _FALLBACK = getattr(settings, "FALLBACK_STORAGE", "fallback")
-
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        storages: Dict[str, Dict[str, Union[str, Dict[Any, Any]]]] = {},
+        resolver: StorageResolver = _NoResolver(),
+    ) -> None:
         """
-        Because we don't have access to the STORAGE variable yet, we
-        can't initialise immediately. We'll wait and run it on the
-        first operation instead.
+        Because we won't be passed any arguments on Django < 4.2, this is just
+        a wrapper around the _init() function, which will actually handle
+        initialisation.
+
+        :param storages: The storages this class uses.
+        :param resolver: The resolver used by this class. If this is
+            _NoResolver, then this function assumes has been called without
+            arguments (typically on Django < 4.2) and defers initialisation.
         """
         self.is_init = False
+        if not isinstance(resolver, _NoResolver):
+            self._init(storages, resolver)
+
+    def _init(
+        self,
+        storages: Dict[str, Dict[str, Union[str, Dict[Any, Any]]]],
+        resolver: StorageResolver,
+    ) -> None:
+        """
+        Actual initialisation function. This is separate from __init__,
+        because initialisation may be deferred if storages can't be
+        obtained when this class is constructed.
+
+        :param storages: Storages mapped to by this dispatcher.
+        :param resolver: The resolver used by this dispatcher.
+        """
+        if self.is_init:
+            raise RuntimeError(
+                "_init called but storage is already initialised"
+            )
+
+        if isinstance(resolver, _NoResolver):
+            raise RuntimeError("Cannot set this resolver to a _NoResolver")
+
+        if isinstance(getattr(self, "_resolver", _NoResolver()), _NoResolver):
+            self._resolver = resolver
+        if not isinstance(resolver, StorageResolver):
+            raise ImproperlyConfigured(
+                "Resolver should derive StorageResolver, but is "
+                f"{type(resolver)}"
+            )
+
+        if self.self_managed:
+            self._init_storages(storages)
+        self.is_init = True
+
+    def _init_storages(
+        self, storages: Dict[str, Dict[str, Union[str, Dict[Any, Any]]]]
+    ) -> None:
+        """
+        Initialise this dispatcher's storages. Meant to be called by
+        _init().
+
+        :param storages: Storages mapped to by this dispatcher.
+        """
+
+        if self.is_init:
+            raise RuntimeError(
+                "_init_storages called but storage is already initialised"
+            )
+        if not self.self_managed:
+            raise RuntimeError(
+                "_init_storages called but storage is not self-managed"
+            )
+        self.is_init = True
+
+        self._managed_storages: Dict[str, Storage] = {}
+        storages = storages or getattr(settings, "STORAGES")
+        for i in filter(lambda x: x != _DEFAULT, storages):
+            self._init_storage(
+                i,
+                # we know what types these dict keys are, even if
+                # mypy doesn't
+                storages[i][_BACKEND],  # type: ignore
+                storages[i].get(_OPTIONS, {}),  # type: ignore
+            )
 
     def __repr__(self) -> str:
         """
@@ -78,9 +171,6 @@ class StorageDispatcher(Storage):
             """
             A shorter and easily readable representation.
             """
-            # if x is a function (we don't support Python 2)
-            if not isinstance(x, object):
-                return x.__qualname__
             # if x uses the default __repr__ function, use its name instead
             # (so that it is shorter and more readable)
             if x.__repr__ is object.__repr__:
@@ -94,30 +184,9 @@ class StorageDispatcher(Storage):
 
         return (
             f"<{self.__class__.__qualname__}: resolver "
-            f"{to_str(self.resolver)}, {len(self._storages())} storages "
+            f"{to_str(self._resolver)}, {len(self._storages())} storages "
             f"({managed_str})>"
         )
-
-    def init(self) -> None:
-        """
-        Initialise all storages.
-        """
-        if self.is_init:
-            raise RuntimeError(
-                "init called but storage is already initialised"
-            )
-        self.is_init = True
-        if not self.self_managed:
-            raise RuntimeError("init called but storage is not self-managed")
-        self.resolver = getattr(settings, "STORAGE_RESOLVER")
-        self._managed_storages: Dict[str, Storage] = {}
-        storages = getattr(settings, "STORAGES")
-        for i in filter(lambda x: x != self._DEFAULT, storages):
-            self._init_storage(
-                i,
-                storages[i][self._BACKEND],
-                storages[i].get(self._OPTIONS, {}),
-            )
 
     def _init_storage(
         self,
@@ -126,7 +195,7 @@ class StorageDispatcher(Storage):
         options: dict = {},
     ) -> None:
         """
-        Initialise a storage. Only called on django < 4.0.
+        Initialise a storage.
 
         :param alias: Storage alias, i.e. the "name" of the storage
         :param backend: Storage backend, class used as the storage
@@ -149,8 +218,9 @@ class StorageDispatcher(Storage):
         """
         Import a storage class.
 
-        :param name: dotted name to the class to import, e.g.,
+        :param name: Dotted name to the class to import, e.g.,
             django.core.files.storage.Storage
+        :return: The imported type
         """
         if not self.self_managed:
             raise RuntimeError(
@@ -173,8 +243,14 @@ class StorageDispatcher(Storage):
         your storage, or access Django's storages directly (if you're
         on Django >= 4.2).
         """
+        # initialisation was deferred: check for options ourselves
+        # in the configuration
         if not self.is_init:
-            self.init()
+            storages = getattr(settings, "STORAGES")
+            self._init(
+                storages,
+                storages[_DEFAULT][_OPTIONS][_RESOLVER],
+            )
         if self.self_managed:
             return self._managed_storages
         else:
@@ -183,7 +259,10 @@ class StorageDispatcher(Storage):
             return storages
 
     def resolve(
-        self, method: str, filename: Optional[str], params: Dict[str, Any]
+        self,
+        method: Optional[str],
+        filename: Optional[str],
+        params: Dict[str, Any],
     ) -> Storage:
         """
         Resolve a storage from given arguments, using this class's
@@ -196,27 +275,34 @@ class StorageDispatcher(Storage):
         :return: The corresponding storage
         """
         if not self.is_init:
-            self.init()
+            storages = getattr(settings, "STORAGES")
+            self._init(
+                storages,
+                storages[_DEFAULT][_OPTIONS][_RESOLVER],
+            )
         try:
-            alias = self.resolver(self._storages(), method, filename, params)
+            alias = self._resolver(self._storages(), method, filename, params)
         except ResolutionError:
             alias = None
         except _NoResolutionError as e:
             raise ResolutionError from e
-        if alias == self._DEFAULT:
+        if alias == _DEFAULT:
             raise ResolutionError(
                 "Cannot use default storage: this is the default storage. "
-                f"Your resolver should never return {self._DEFAULT}."
+                f"Your resolver should never return {_DEFAULT}."
             )
         try:
-            return self._storages()[alias]
-        except KeyError as e:
+            return self._storages()[alias if alias is not None else _FALLBACK]
+        # Ideally, we should only be catching KeyError and
+        # InvalidStorageError; however, the latter doesn't exist on
+        # Django < 4.2, so we catch the closest possible one instead.
+        except (KeyError, ImproperlyConfigured) as e:
             try:
-                return self._storages()[self._FALLBACK]
-            except KeyError:
+                return self._storages()[_FALLBACK]
+            except (KeyError, ImproperlyConfigured):
                 raise ResolutionError(
                     f'No matching storage found (tried "{alias}" and '
-                    f'"{self._FALLBACK}").'
+                    f'"{_FALLBACK}").'
                 ) from e
 
     def delete(self, name: str) -> None:

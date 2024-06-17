@@ -53,7 +53,7 @@ class StorageResolver:
         self,
         storages,
         method: Optional[str],
-        filename: str,
+        filename: Optional[str],
         params: Dict[str, Any],
     ) -> Optional[str]:
         """
@@ -62,6 +62,23 @@ class StorageResolver:
         of resolve(), but it usually isn't needed.
         """
         return self.resolve(storages, method, filename, params)
+
+
+class _NoResolver(StorageResolver):
+    """
+    This class represents a lack of resolver. You should not use it.
+    """
+
+    def resolve(
+        self,
+        storages,
+        method: Optional[str],
+        filename: Optional[str],
+        params: Dict[str, Any],
+    ) -> Optional[str]:
+        raise RuntimeError(
+            "_NoResolver is not an actual resolver, do not use it"
+        )
 
 
 class ExtensionResolver(StorageResolver):
