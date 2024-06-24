@@ -1,0 +1,99 @@
+#!/usr/bin/sh
+
+# Test utility for storage_dispatcher
+# Usage:
+#     ./run-tests.sh [PACKAGE]
+#
+# where PACKAGE is the name (not path) of the package to be tested,
+# e.g., "storage_dispatcher-0.0.1.tar.gz"
+
+set -eu
+
+# Django versions to be tested. In this repo, we test all LTS versions
+# (even expired ones) except for Django 1, and all minor releases of
+# the current major release.
+django_versions="2.2 3.2 4.2 5.0 5.1a1"
+
+# The default path used, only used if a package path isn't specified. This
+# corresponds to the build location.
+default_package_path='../dist'
+
+# This is the path *relative to where we are in the virtual environment when
+# running tests*. Don't touch this, I'll remove it soon
+test_path='../..'
+
+case $# in
+0)
+	echo "No path specified, looking for package in $default_package_path..."
+	package_path="$(find "$default_package_path" -maxdepth 1 -name '*.tar.gz')"
+	if [ "$(echo "$package_path" | wc -l)" -ne 1 ]; then
+		cat > /dev/stderr <<- END
+			Could not find package location: found $(echo "$package_path" | wc -l) results
+			Try manually entering your package: it's probably one of the following:
+			$package_path
+		END
+		exit 1
+	fi
+	package_name="${package_path##*/}"
+	echo "Found $package_name"
+	;;
+1)
+	package_path="$1"
+	package_name="${package_path##*/}"
+	;;
+*)
+	cat > /dev/stderr <<- END
+		Usage: $0 [PACKAGE]
+		where PACKAGE is the path of the package to be tested, e.g., "storage_dispatcher-0.0.1.tar.gz"
+		If PACKAGE is not specified, this script will attempt to detect the package's location.
+	END
+	exit 1
+	;;
+esac
+
+if [ ! -f "$package_path" ]; then
+	cat > /dev/stderr <<- END
+		Error: $package_path was not found.
+		Maybe you meant one of the following: ${package_path%/*}"/
+	END
+	exit 1
+fi
+
+for version in $django_versions; do
+	printf "Django %s: " "$version"
+	if [ -d "./django-$version" ]; then
+		rm -r "./django-$version"
+	fi
+
+	# create and enter virtual environment
+	printf "Building... "
+	python3 -m venv "django-$version"
+	ln -f "$package_path" "django-$version/$package_name"
+	cd "django-$version"
+	# shellcheck disable=SC1091
+	. bin/activate
+
+	# install dependencies
+	pip install -q "django==$version" "$package_name"
+
+	# set up django project
+	django-admin startproject 'storagetest'
+	cd storagetest
+	cp -L "$test_path/tests-django-$version.py" "storagetest/test.py"
+
+	# run tests
+	echo "Running... "
+	python manage.py test
+	new_code="$?"
+	return_code="$(( return_code > new_code ? return_code : new_code))"
+	cd ..
+
+	# exit and destroy virtual environment
+	deactivate
+	cd ..
+	rm -r "django-$version"
+done
+
+echo "Tests returned $return_code"
+exit "$return_code"
+
