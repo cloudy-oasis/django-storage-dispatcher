@@ -37,6 +37,7 @@ def is_self_managed() -> bool:
 
     return int(version[1]) < 2
 
+
 # Storage backend key in the Django STORAGES variable.
 _BACKEND = "BACKEND"
 
@@ -81,14 +82,15 @@ class StorageDispatcher(Storage):
         resolver: StorageResolver = _NoResolver(),
     ) -> None:
         """
-        Because we won't be passed any arguments on Django < 4.2, this is just
-        a wrapper around the _init() function, which will actually handle
-        initialisation.
+        Because we won't be passed any arguments on Django < 4.2, this
+        is just a wrapper around the _init() function, which will
+        actually handle initialisation.
 
         :param storages: The storages this class uses.
         :param resolver: The resolver used by this class. If this is
-            _NoResolver, then this function assumes has been called without
-            arguments (typically on Django < 4.2) and defers initialisation.
+            _NoResolver, then this function assumes it has been called
+            without arguments (typically on Django < 4.2) and defers
+            initialisation.
         """
         self.is_init = False
         if not isinstance(resolver, _NoResolver):
