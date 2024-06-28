@@ -1,6 +1,12 @@
 Configuration
 =============
 
+There are two main parts to configuring this application:
+[configuring your storages](<#the-storages-variable>) using the ``STORAGES``
+variable, and [defining your resolver](<#defining-a-resolver>).
+Additionally, on Django < 4.2, you need to set a dispatcher as your default
+storage.
+
 The ``STORAGES`` variable
 -------------------------
 
@@ -24,7 +30,7 @@ For example, here is a simple configuration:
 STORAGES = {
     # StorageDispatcher is set as the default storage.
     "default": {
-        "BACKEND": "django_storage_dispatcher.StorageDispatcher",
+        "BACKEND": "storage_dispatcher.StorageDispatcher",
         "OPTIONS": {
             # NoneResolver is defined in another example. It always
             # returns None.
@@ -117,18 +123,14 @@ initialise storages. It will read its parameters from the ``default`` storage,
 therefore it needs to be the ``default`` storage.
 
 You do not need to remove ``DEFAULT_FILE_STORAGE`` when migrating to
-Django >= 4.2, but you can do so, it will not be used anymore.
+Django >= 4.2, but you can do so, as it will not be used anymore.
 
 See [Django's documentation][django-DEFAULTSTORAGE] for more information.
 
 ### Additional configuration after Django 4.2 ###
 
-> [!IMPORTANT]
-> You still need to configure
-> [the ``STORAGES`` variable](<#the-storages-variable>).
-
 After Django 4.2, no additional configuration is needed. You don't have to set
 a dispatcher as the ``default`` storage.
 
-[django-DEFAULTSTORAGE]: https://docs.djangoproject.com/en/3.2/ref/settings/#std-setting-DEFAULT_FILE_STORAGE
+[django-DEFAULTSTORAGE]: <https://docs.djangoproject.com/en/3.2/ref/settings/#std-setting-DEFAULT_FILE_STORAGE>
 
